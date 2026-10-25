@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nested Index MEC Scheduling Simulator</title>
+<style>
+:root{--bg:#0b1220;--panel:#121c2e;--panel2:#17243a;--line:#2a3b55;--text:#e8eef8;--muted:#9fb0c8;--blue:#69a7ff;--green:#5dd6a1;--orange:#ffbf69;--red:#ff7d8a}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#0b1220,#101b2d);color:var(--text);font:14px/1.45 Arial,sans-serif}
+main{max-width:1400px;margin:auto;padding:22px}.top{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
+h1{font-size:25px;margin:0 0 5px}.sub{color:var(--muted)}.tag{border:1px solid #4a5f7e;border-radius:20px;padding:7px 12px;color:#c7d8f1}
+.controls,.panel{background:rgba(18,28,46,.96);border:1px solid var(--line);border-radius:14px;padding:15px}
+.controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:18px 0}
+label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}select,input,button{background:#1b2a42;color:var(--text);border:1px solid #3a506e;border-radius:8px;padding:9px 10px}
+button{cursor:pointer;font-weight:bold}button.primary{background:#2563a6;border-color:#397fc3}button:hover{filter:brightness(1.13)}
+.grid{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}.full{grid-column:1/-1}.panel h2{font-size:16px;margin:0 0 12px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.metric{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}.metric small{display:block;color:var(--muted)}.metric strong{font-size:22px;display:block;margin-top:4px}
+.server-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.server{border:1px solid #3b5271;background:#17263b;border-radius:12px;padding:12px;min-height:145px}.server h3{margin:0 0 6px;font-size:15px}.bar{height:7px;background:#293c55;border-radius:8px;overflow:hidden;margin:7px 0}.bar span{display:block;height:100%;background:var(--green);width:0%}.chip{display:inline-block;border-radius:15px;background:#263b57;padding:3px 7px;font-size:11px;margin:3px 3px 0 0}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:8px;border-bottom:1px solid var(--line);text-align:center}th{color:#afc3df;font-weight:600}td:first-child,th:first-child{text-align:left}.best{background:#173d3b;color:#a7f3d0;font-weight:bold}.muted{color:var(--muted)}.log{height:170px;overflow:auto;font-family:Consolas,monospace;font-size:12px;background:#0c1524;border-radius:8px;padding:10px}.log div{padding:3px 0;border-bottom:1px solid #1b2b42}
+.timeline{display:flex;gap:3px;align-items:stretch;min-height:52px;overflow-x:auto}.slot{min-width:82px;flex:1;border:1px solid #3b5271;border-radius:7px;padding:6px;text-align:center;background:#18273d}.slot b{display:block}.slot small{color:var(--muted)}
+.note{color:#f9d9a8;background:#392b19;border:1px solid #71512a;padding:10px 12px;border-radius:9px;margin:14px 0;font-size:12px}
+.chart-wrap{height:210px;position:relative}.chart-wrap canvas{width:100%;height:100%}
+@media(max-width:900px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.metrics{grid-template-columns:repeat(2,1fr)}.server-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body><main>
+<div class="top"><div><h1>Nested Index MEC Scheduling Simulator</h1><div class="sub">Visualize user states → index scores → server assignment → AoI updates</div></div><div class="tag">Paper formula · index-based scheduling</div></div>
+<div class="note"><b>Index formula used:</b> <strong>I<sub>nm</sub>(A, ν) = ν<sub>m−1</sub> + A − γ<sub>n</sub><sup>*</sup></strong>. The score matrix below is calculated using this expression. Servers are ordered by increasing cost to determine the preceding-server cost ν<sub>m−1</sub>; for the first server, the predecessor cost is taken as 0. Set γ* in the controls. This implements the paper's stated index-formula case, not the complete MDP solver.</div>
+<div class="controls">
+<div><label>Scheduling mode</label><select id="mode"><option value="pre">Preemptive</option><option value="non">Non-preemptive</option></select></div>
+<div><label>Number of users</label><select id="userCount"><option>3</option><option selected>4</option><option>5</option><option>6</option></select></div>
+<div><label>Number of servers</label><select id="serverCount"><option>2</option><option selected>3</option><option>4</option></select></div>
+<div><label>Random seed</label><input id="seed" type="number" value="7" min="1" max="9999" style="width:95px"></div><div><label>γ* (gamma star)</label><input id="gamma" type="number" value="5" min="0" max="1000" step="0.1" style="width:95px"><small class="muted" style="display:block;margin-top:4px">Average-cost parameter</small></div>
+<button class="primary" id="stepBtn">Run 1 time slot</button><button id="autoBtn">▶ Auto run</button><button id="resetBtn">Reset</button>
+</div>
+<div class="metrics">
+<div class="metric"><small>Current time slot</small><strong id="timeMetric">0</strong></div>
+<div class="metric"><small>Average AoI (current)</small><strong id="aoiMetric">0.0</strong></div>
+<div class="metric"><small>Active tasks</small><strong id="activeMetric">0</strong></div>
+<div class="metric"><small>Assignments this slot</small><strong id="assignMetric">0</strong></div>
+</div>
+<div class="grid">
+<section class="panel"><h2>1. Edge server status</h2><div class="server-grid" id="servers"></div></section>
+<section class="panel"><h2>2. User state table</h2><div style="overflow:auto"><table id="usersTable"></table></div><p class="muted">AoI increases with time and resets to 1 when a task update completes in this simplified model.</p></section>
+<section class="panel"><h2>3. Nested-index score matrix</h2><div style="overflow:auto"><table id="indexTable"></table></div><p class="muted">Each cell uses I<sub>nm</sub> = ν<sub>m−1</sub> + A<sub>n</sub> − γ<sub>n</sub><sup>*</sup>. Green cells are selected this slot.</p><p class="muted">The score is recalculated from current AoI, ordered server costs, and the γ* value above.</p></section>
+<section class="panel"><h2>4. Scheduler decision log</h2><div class="log" id="log"></div></section>
+<section class="panel full"><h2>5. Live assignment timeline</h2><div class="timeline" id="timeline"><div class="muted">Run a time slot to start the simulation.</div></div></section>
+<section class="panel"><h2>6. Average AoI over time</h2><div class="chart-wrap"><canvas id="chart" width="700" height="230"></canvas></div></section>
+<section class="panel"><h2>7. Current assignment explanation</h2><div id="explain" class="muted">Press “Run 1 time slot” to see the index scores and assignment choices.</div></section>
+</div>
+</main>
+<script>
+let state, autoTimer=null, seedBase=7;
+function rngFactory(seed){let s=seed>>>0;return ()=>{s=(1664525*s+1013904223)>>>0;return s/4294967296}}
+function init(){
+ stopAuto(); seedBase=Number(document.getElementById('seed').value)||7;
+ const rand=rngFactory(seedBase), U=Number(document.getElementById('userCount').value), M=Number(document.getElementById('serverCount').value);
+ state={t:0,mode:document.getElementById('mode').value,users:[],servers:[],history:[],log:[],lastScores:[],lastAssign:[],timeline:[],rand};
+ for(let m=0;m<M;m++)state.servers.push({id:'S'+(m+1),p:[.85,.65,.45,.3][m%4],min:[2,3,4,5][m%4],cost:1+m*.7,job:null,used:0,completions:0});
+ for(let n=0;n<U;n++)state.users.push({id:'U'+(n+1),age:1+Math.floor(rand()*5),genAge:0,job:null,done:0,waiting:0});
+ state.log.push('Initialized '+U+' users and '+M+' heterogeneous servers.'); render();
+}
+function stopAuto(){if(autoTimer){clearInterval(autoTimer);autoTimer=null}let b=document.getElementById('autoBtn');if(b)b.textContent='▶ Auto run'}
+function addLog(s){state.log.unshift('t='+state.t+': '+s);state.log=state.log.slice(0,60)}
+function score(u,s){
+ // Paper's stated nested-index expression: I_nm(A,nu) = nu_(m-1) + A - gamma*_n.
+ // Servers are ranked by ascending cost; the first server has predecessor cost 0.
+ const ordered=[...state.servers].sort((a,b)=>a.cost-b.cost || a.id.localeCompare(b.id));
+ const rank=ordered.findIndex(x=>x.id===s.id);
+ const predecessorCost=rank<=0?0:ordered[rank-1].cost;
+ const gamma=Math.max(0,Number(document.getElementById('gamma').value)||0);
+ return +(predecessorCost + u.age - gamma).toFixed(2)
+}
+function bestMatching(users,servers,scores){
+ // exhaustive one-to-one assignment search; each user/server can be assigned at most once
+ let best={value:-Infinity,pairs:[]};
+ function rec(i,used,pairs,value){
+  if(i===users.length){if(value>best.value)best={value,pairs:pairs.slice()};return}
+  rec(i+1,used,pairs,value);
+  for(let j=0;j<servers.length;j++){if(used.has(j))continue;let v=scores[i][j];if(v<=0)continue;
+   used.add(j);pairs.push([i,j]);rec(i+1,used,pairs,value+v);pairs.pop();used.delete(j)}
+ }
+ rec(0,new Set(),[],0);return best.pairs;
+}
+function step(){
+ if(!state)return;
+ const U=state.users,S=state.servers,mode=state.mode;
+ // release assignments that completed in the previous slot; a new matching is made each slot.
+ for(let s of S)if(s.job && s.job.remaining<=0)s.job=null;
+ // score every user-server pair; ongoing non-preemptive tasks cannot be reassigned
+ let scores=U.map(u=>S.map(s=>score(u,s)));
+ let assign=[];
+ if(mode==='pre'){
+  assign=bestMatching(U,S,scores);
+ }else{
+  // Preserve locked, active jobs first
+  let lockedU=new Set(),lockedS=new Set();
+  S.forEach((s,j)=>{if(s.job){let i=U.findIndex(u=>u.id===s.job.uid);if(i>=0){assign.push([i,j]);lockedU.add(i);lockedS.add(j)}}});
+  let remU=U.map((u,i)=>i).filter(i=>!lockedU.has(i));
+  let remS=S.map((s,j)=>j).filter(j=>!lockedS.has(j));
+  let reduced=remU.map(i=>remS.map(j=>scores[i][j]));
+  bestMatching(remU.map(i=>U[i]),remS.map(j=>S[j]),reduced).forEach(([a,b])=>assign.push([remU[a],remS[b]]));
+ }
+ let assignedUsers=new Set(assign.map(p=>p[0])),assignedServers=new Set(assign.map(p=>p[1]));
+ state.lastScores=scores;state.lastAssign=assign;
+ // In preemptive mode, a task can be interrupted and reassigned at a new slot.
+ if(mode==='pre'){
+  for(let j=0;j<S.length;j++){
+   const s=S[j];
+   if(s.job){
+    const i=U.findIndex(u=>u.id===s.job.uid);
+    const stillAssigned=assign.some(([ai,aj])=>ai===i && aj===j);
+    if(!stillAssigned){
+     addLog('Preemption: '+s.job.uid+' task interrupted on '+s.id+'.');
+     if(i>=0)U[i].job=null;
+     s.job=null;
+    }
+   }
+  }
+ }
+ // Existing and new jobs start or continue; process one slot of work.
+ let completed=[];
+ for(let [i,j] of assign){
+  let u=U[i],s=S[j];
+  if(s.job && s.job.uid!==u.id){
+   addLog('Preemption: '+s.job.uid+' replaced on '+s.id+' by '+u.id+'.');
+   const oldUser=U.find(x=>x.id===s.job.uid);if(oldUser)oldUser.job=null;
+   s.job=null;
+  }
+  if(!s.job){s.job={uid:u.id,remaining:s.min,elapsed:0,genAge:u.age};u.job=s.id;u.genAge=u.age;addLog(u.id+' task assigned to '+s.id+' (index '+scores[i][j]+').')}
+  else {u.job=s.id}
+  s.job.remaining--;s.job.elapsed++;s.used++;
+  if(s.job.remaining<=0){
+   // completion chance after minimum time: probability p; if not successful, continue another slot
+   if(state.rand()<s.p){
+    completed.push({uid:u.id,sid:s.id,age:u.age});
+    addLog('Task from '+u.id+' completed on '+s.id+' (success probability '+s.p+').');
+    s.completions++;s.job=null;u.job=null;u.age=1;u.done++;
+   }else{
+    s.job.remaining=1;addLog(s.id+' did not complete task this slot; task continues.');
+   }
+  }
+ }
+ // Age advances for users without a completed update
+ for(let u of U){if(!completed.some(c=>c.uid===u.id))u.age++;if(!assignedUsers.has(U.indexOf(u)))u.waiting++}
+ // In this teaching demo cost changes gently with utilization; not the paper's dual update
+ for(let s of S){let util=s.used/Math.max(1,state.t+1);s.cost=Math.max(.2,Math.min(10,s.cost+.08*(util-.5)))}
+ state.t++;state.history.push(U.reduce((a,u)=>a+u.age,0)/U.length);
+ state.timeline.push({t:state.t,pairs:assign.map(([i,j])=>U[i].id+'→'+S[j].id),done:completed.map(c=>c.uid)});
+ state.timeline=state.timeline.slice(-12);
+ render();
+}
+function render(){
+ const U=state.users,S=state.servers;
+ document.getElementById('timeMetric').textContent=state.t;
+ document.getElementById('aoiMetric').textContent=(U.reduce((a,u)=>a+u.age,0)/U.length).toFixed(2);
+ document.getElementById('activeMetric').textContent=S.filter(s=>s.job).length;
+ document.getElementById('assignMetric').textContent=state.lastAssign.length;
+ document.getElementById('servers').innerHTML=S.map(s=>`<div class="server"><h3>▣ ${s.id}</h3><span class="chip">P(success) ${s.p.toFixed(2)}</span><span class="chip">Min time ${s.min}</span><div class="bar"><span style="width:${Math.min(100,s.used/Math.max(1,state.t)*12)}%"></span></div><div class="muted">Cost: ${s.cost.toFixed(2)} · Slots used: ${s.used}</div><p>${s.job?`<b style="color:var(--orange)">Running ${s.job.uid}</b><br>Remaining: ${s.job.remaining}`:'<span style="color:var(--green)">Available</span>'}</p></div>`).join('');
+ document.getElementById('usersTable').innerHTML='<thead><tr><th>User</th><th>AoI Δ</th><th>Task state</th><th>Completed</th><th>Waiting slots</th></tr></thead><tbody>'+U.map(u=>`<tr><td>${u.id}</td><td>${u.age}</td><td>${u.job||'No task running'}</td><td>${u.done}</td><td>${u.waiting}</td></tr>`).join('')+'</tbody>';
+ const assigned=new Set(state.lastAssign.map(([i,j])=>i+','+j));
+ document.getElementById('indexTable').innerHTML='<thead><tr><th>User / Server</th>'+S.map(s=>`<th>${s.id}<br><small>cost ${s.cost.toFixed(1)}</small></th>`).join('')+'</tr></thead><tbody>'+U.map((u,i)=>`<tr><td>${u.id} (AoI ${u.age})</td>`+S.map((s,j)=>`<td class="${assigned.has(i+','+j)?'best':''}">${state.lastScores[i]?.[j]??'—'}${assigned.has(i+','+j)?' ✓':''}</td>`).join('')+'</tr>').join('')+'</tbody>';
+ document.getElementById('log').innerHTML=state.log.map(x=>`<div>${x}</div>`).join('');
+ document.getElementById('timeline').innerHTML=state.timeline.length?state.timeline.map(t=>`<div class="slot"><b>Slot ${t.t}</b>${t.pairs.map(p=>`<div>${p}</div>`).join('')||'<small>Idle</small>'}${t.done.length?`<small style="color:var(--green)">Completed: ${t.done.join(', ')}</small>`:''}</div>`).join(''):'<div class="muted">Run a time slot to start the simulation.</div>';
+ document.getElementById('explain').innerHTML=state.lastAssign.length?state.lastAssign.map(([i,j])=>{const ordered=[...S].sort((a,b)=>a.cost-b.cost || a.id.localeCompare(b.id));const rank=ordered.findIndex(s=>s.id===S[j].id);const prev=rank<=0?0:ordered[rank-1].cost;const gamma=Math.max(0,Number(document.getElementById('gamma').value)||0);return `<p><b>${U[i].id} → ${S[j].id}</b><br>Index formula: I<sub>nm</sub> = ν<sub>m−1</sub> + A<sub>n</sub> − γ<sub>n</sub><sup>*</sup><br>Substitution: ${prev.toFixed(2)} + ${U[i].age} − ${gamma.toFixed(2)} = <b>${state.lastScores[i][j].toFixed(2)}</b>.<br><span class="muted">Preceding server cost is based on ascending server-cost order. Matching also respects one-user-per-server and one-server-per-user constraints.</span></p>`}).join(''):'No assignment has been selected yet.';
+ drawChart();
+}
+function drawChart(){
+ const c=document.getElementById('chart'),ctx=c.getContext('2d'),w=c.width,h=c.height;ctx.clearRect(0,0,w,h);
+ ctx.strokeStyle='#2a3b55';ctx.lineWidth=1;
+ for(let i=0;i<5;i++){let y=15+i*(h-35)/4;ctx.beginPath();ctx.moveTo(38,y);ctx.lineTo(w-10,y);ctx.stroke()}
+ if(state.history.length<1){ctx.fillStyle='#9fb0c8';ctx.fillText('Run the simulation to plot average AoI.',50,100);return}
+ let max=Math.max(...state.history,5)*1.15;ctx.strokeStyle='#69a7ff';ctx.lineWidth=2;ctx.beginPath();
+ state.history.forEach((v,i)=>{let x=40+(state.history.length===1?0:i*(w-55)/(state.history.length-1)),y=h-20-v/max*(h-40);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.stroke();
+ ctx.fillStyle='#9fb0c8';ctx.font='11px Arial';ctx.fillText('AoI',4,14);ctx.fillText('Time slot →',w-80,h-3);
+}
+document.getElementById('stepBtn').addEventListener('click',step);
+document.getElementById('resetBtn').addEventListener('click',init);
+document.getElementById('mode').addEventListener('change',init);
+document.getElementById('userCount').addEventListener('change',init);
+document.getElementById('serverCount').addEventListener('change',init);
+document.getElementById('gamma').addEventListener('change',()=>{if(state){state.lastScores=state.users.map(u=>state.servers.map(s=>score(u,s)));render()}});
+document.getElementById('autoBtn').addEventListener('click',()=>{if(autoTimer){stopAuto();return}document.getElementById('autoBtn').textContent='Ⅱ Pause';autoTimer=setInterval(step,1000)});
+init();
+</script></body></html>
